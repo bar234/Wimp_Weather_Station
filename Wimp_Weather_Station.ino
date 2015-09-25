@@ -61,7 +61,6 @@ const byte STAT1 = 7;
 // analog I/O pins
 const byte WDIR = A0;
 const byte LIGHT = A1;
-const byte BATT = A2;
 const byte REFERENCE_3V3 = A3;
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -145,7 +144,7 @@ float pressure;             // It's hard to calculate baromin locally, do this
                             // in the agent
 
 // These are not wunderground values, they are just for us
-int batt_lvl = 0;
+float batt_lvl = 0.0;
 float light_lvl = 0.0;
 
 // volatiles are subject to modification by IRQs
@@ -244,31 +243,28 @@ float get_light_level()
     return(lightSensor);
 }
 
-// Returns the voltage of the raw pin based on the 3.3V rail.  The battery can
-// range from 4.2V down to around 3.3V.  This function allows us to ignore what
-// VCC might be (an Arduino plugged into USB has VCC of 4.5 to 5.2V) and base
-// the conversion on the 3.3V rail.  The weather shield has a pin called RAW
-// (VIN) fed through through two 5% resistors and connected to A2 (BATT): 3.9K
-// on the high side (R1), and 1K on the low side (R2)
+// Return the Vcc voltage level based on the internal ADC reading of the 1.1v
+// reference. See https://code.google.com/p/tinkerit/wiki/SecretVoltmeter for
+// more details
 float get_battery_level()
 {
-	float operatingVoltage = averageAnalogRead(REFERENCE_3V3);
+    long result;
 
-	float rawVoltage = averageAnalogRead(BATT);
+    // Read 1.1V reference against AVcc
+    ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
 
-    // The reference voltage is 3.3V
-	operatingVoltage = 3.30 / operatingVoltage;
+    delay(2); // Wait for Vref to settle
 
-    // Convert the 0 to 1023 int to actual voltage on BATT pin
-	rawVoltage *= operatingVoltage;
+    ADCSRA |= _BV(ADSC); // Convert
 
-    // (3.9k+1k)/1k - multiply BATT voltage by the voltage divider to get
-    // actual system voltage
-	rawVoltage *= 4.90;
+    while (bit_is_set(ADCSRA,ADSC));
 
-	return(rawVoltage);
+    result = ADCL;
+    result |= ADCH<<8;
+    result = 1126400L / result; // Back-calculate AVcc in mV
+
+    return result / 1000.0;
 }
-
 
 // Calculates each of the variables that wunderground is expecting
 void calcWeather()
@@ -293,37 +289,37 @@ void calcWeather()
     // You can't just take the average. Google "mean of circular quantities"
     // for more info. We will use the Mitsuta method because it doesn't require
     // trig functions. And because it sounds cool.
-	// Ref: http://abelian.org/vlf/bearings.html
-	// Ref: http://stackoverflow.com/questions/1813483/averaging-angles-again
-	long sum = winddiravg[0];
-	int D = winddiravg[0];
-	for(int i = 1 ; i < WIND_DIR_AVG_SIZE ; i++)
-	{
-		int delta = winddiravg[i] - D;
+    // Ref: http://abelian.org/vlf/bearings.html
+    // Ref: http://stackoverflow.com/questions/1813483/averaging-angles-again
+    long sum = winddiravg[0];
+    int D = winddiravg[0];
+    for(int i = 1 ; i < WIND_DIR_AVG_SIZE ; i++)
+    {
+        int delta = winddiravg[i] - D;
 
-		if(delta < -180)
+        if(delta < -180)
         {
-			D += delta + 360;
+            D += delta + 360;
         }
-		else if(delta > 180)
+        else if(delta > 180)
         {
-			D += delta - 360;
+            D += delta - 360;
         }
-		else
+        else
         {
-			D += delta;
+            D += delta;
         }
 
-		sum += D;
-	}
-	winddir_avg2m = sum / WIND_DIR_AVG_SIZE;
+        sum += D;
+    }
+    winddir_avg2m = sum / WIND_DIR_AVG_SIZE;
 
-	if(winddir_avg2m >= 360)
+    if(winddir_avg2m >= 360)
     {
         winddir_avg2m -= 360;
     }
 
-	if(winddir_avg2m < 0)
+    if(winddir_avg2m < 0)
     {
         winddir_avg2m += 360;
     }
@@ -362,9 +358,8 @@ void calcWeather()
     // Calc light level
     light_lvl = get_light_level();
 
-    // Calc battery level by returning the 0-1023 value for 3.3v. The agent
-    // will calculate what voltage 1023 represents BATT
-	batt_lvl = get_battery_level();
+    // Calc battery level
+    batt_lvl = get_battery_level();
 }
 
 // Returns the instataneous wind speed
@@ -564,7 +559,7 @@ void reportWeather()
                         // calcs on the number
     Serial.print(pressure, 2);
     Serial.print(",batt_lvl=");
-    Serial.print(batt_lvl);
+    Serial.print(batt_lvl, 2);
     Serial.print(",light_lvl=");
     Serial.print(light_lvl, 2);
 
