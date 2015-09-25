@@ -23,7 +23,7 @@ server.log("Device started, impee_id " + hardware.getimpeeid() + " and mac = " +
 //------------------------------------------------------------------------------------------------------------------------------
 // Uart57 for TX/RX
 SERIAL <- hardware.uart57;
-SERIAL.configure(115200, 8, PARITY_NONE, 1, NO_CTSRTS);
+SERIAL.configure(9600, 8, PARITY_NONE, 1, NO_CTSRTS);
 
 // Set pin1 high for normal operation
 // Set pin1 low to reset a standard Arduino
@@ -94,20 +94,20 @@ function HEXDUMP(buf, len = null) {
     if (len == null) {
         len = (typeof buf == "blob") ? buf.tell() : buf.len();
     }
-    
+
     local dbg = "";
     for (local i = 0; i < len; i++) {
         local ch = buf[i];
         dbg += format("0x%02X ", ch);
     }
-    
+
     return format("%s (%d bytes)", dbg, len)
 }
 
 
 //------------------------------------------------------------------------------------------------------------------------------
 function SERIAL_READ(len = 100, timeout = 300) {
-    
+
     local rxbuf = blob(len);
     local write = rxbuf.writen.bindenv(rxbuf);
     local read = SERIAL.read.bindenv(SERIAL);
@@ -129,7 +129,7 @@ function SERIAL_READ(len = 100, timeout = 300) {
 
     // Clean up any extra bytes
     while (SERIAL.read() != -1);
-    
+
     if (rxbuf.tell() == 0) {
         return null;
     } else {
@@ -140,7 +140,7 @@ function SERIAL_READ(len = 100, timeout = 300) {
 
 //------------------------------------------------------------------------------------------------------------------------------
 function execute(command = null, param = null, response_length = 100, response_timeout = 300) {
-    
+
     local send_buffer = null;
     if (command == null) {
         send_buffer = format("%c", CRC_EOP);
@@ -166,18 +166,18 @@ function execute(command = null, param = null, response_length = 100, response_t
     } else {
         send_buffer = format("%c%c%c", command, param, CRC_EOP);
     }
-    
+
     // server.log("Sending: " + HEXDUMP(send_buffer));
     SERIAL.write(send_buffer);
-    
+
     local resp_buffer = SERIAL_READ(response_length+2, response_timeout);
     // server.log("Received: " + HEXDUMP(resp_buffer));
-    
+
     assert(resp_buffer != null);
     assert(resp_buffer.tell() >= 2);
     assert(resp_buffer[0] == STK_INSYNC);
     assert(resp_buffer[resp_buffer.tell()-1] == STK_OK);
-    
+
     local tell = resp_buffer.tell();
     if (tell == 2) return blob(0);
     resp_buffer.seek(1);
@@ -188,7 +188,7 @@ function execute(command = null, param = null, response_length = 100, response_t
 //------------------------------------------------------------------------------------------------------------------------------
 function check_duino() {
     // Clear the read buffer
-    SERIAL_READ(); 
+    SERIAL_READ();
 
     // Check everything we can check to ensure we are speaking to the correct boot loader
     local major = execute(STK_GET_PARAMETER, 0x81, 1);
@@ -208,11 +208,11 @@ function program_duino(address16, data) {
     local addr8_hi = (address16 >> 8) & 0xFF;
     local addr8_lo = address16 & 0xFF;
     local data_len = data.len();
-    
+
     execute(STK_LOAD_ADDRESS, [addr8_lo, addr8_hi], 0);
     execute(STK_PROG_PAGE, [0x00, data_len, 0x46, data], 0)
     local data_check = execute(STK_READ_PAGE, [0x00, data_len, 0x46], data_len)
-    
+
     assert(data_check.len() == data_len);
     for (local i = 0; i < data_len; i++) {
         assert(data_check[i] == data[i]);
@@ -251,7 +251,7 @@ function scan_serial() {
             str += format("%c", ch);
         }
     } while (ch != -1);
-    
+
     if (str.len() > 0) {
         server.log("Serial: " + str);
     }
@@ -259,7 +259,7 @@ function scan_serial() {
 
 //------------------------------------------------------------------------------------------------------------------------------
 function burn(pline) {
-    
+
     if ("first" in pline) {
         server.log("Starting to burn");
         SERIAL.configure(115200, 8, PARITY_NONE, 1, NO_CTSRTS);
@@ -294,15 +294,15 @@ function toggleRxLED()
 agent.on("sendMidnightReset", function(ignore) {
     server.log("Device midnight reset");
     SERIAL.write("@"); //Special midnight command
+
 });
 
 // Send a character to the Arduino to gather the latest data
 // Pass that data onto the Agent for parsing and posting to Wunderground
 function checkWeather() {
-    
     //Get all the various bits from the Arduino over UART
     server.log("Gathering new weather data");
-    
+
     //Clean out any previous characters in any buffers
     SERIAL.flush();
 
@@ -317,14 +317,14 @@ function checkWeather() {
         result = SERIAL.read(); //Wait for a new character to arrive
 
         imp.sleep(0.01);
-        if(counter++ > 200) //2 seconds
+        if(counter++ > 400) //4 seconds
         {
             server.log("Serial timeout error initial");
-            return(0); //Bail after 2000ms max wait 
+            return(0); //Bail after 2000ms max wait
         }
     }
     //server.log("Counter: " + counter);
-    
+
     // Collect bytes
     local incomingStream = "";
     while (result != '\n')  // Keep reading until we see a newline
@@ -333,26 +333,23 @@ function checkWeather() {
         while(result == NOCHAR)
         {
             result = SERIAL.read();
-    
+
             if(result == NOCHAR)
             {
                 imp.sleep(0.01);
                 if(counter++ > 20) //Wait no more than 20ms for another character
                 {
                     server.log("Serial timeout error");
-                    return(0); //Bail after 20ms max wait 
+                    return(0); //Bail after 20ms max wait
                 }
             }
         }
-        
-        //server.log("Test: " + format("%c", result)); // Display in log window
 
         incomingStream += format("%c", result);
         toggleTxLED();  // Toggle the TX LED
 
         result = SERIAL.read(); //Grab the next character in the que
     }
-    
 
     server.log("We heard: " + format("%s", incomingStream)); // Display in log window
     server.log("Arduino read complete");
@@ -361,8 +358,6 @@ function checkWeather() {
 
     // Send info to agent, that will in turn push to internet
     agent.send("postToInternet", incomingStream);
-    
-    //imp.wakeup(10.0, checkWeather);
 }
 
 //These are needed for the wireless reprogramming

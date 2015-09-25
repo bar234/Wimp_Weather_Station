@@ -8,7 +8,7 @@
 //          We hope it saves you some time, or helps you learn something!
 //          If you find it handy, and we meet some day, you can buy me a beer or iced tea in return.
 
-// Example incoming serial string from device: 
+// Example incoming serial string from device:
 // $,winddir=270,windspeedmph=0.0,windgustmph=0.0,windgustdir=0,windspdmph_avg2m=0.0,winddir_avg2m=12,windgustmph_10m=0.0,windgustdir_10m=0,humidity=998.0,tempf=-1766.2,rainin=0.00,dailyrainin=0.00,pressure=-999.00,batt_lvl=16.11,light_lvl=3.32,#
 
 local STATION_ID = "KCOBOULD95";
@@ -17,11 +17,11 @@ local STATION_PW = "password"; //Note that you must only use alphanumerics in yo
 local sparkfun_publicKey = "dZ4EVmE8yGCRGx5XRX1W";
 local sparkfun_privateKey = "privatekey";
 
-local LOCAL_ALTITUDE_METERS = 1638; //Accurate for the roof on my house
+local LOCAL_ALTITUDE_METERS = 869; //Accurate for the roof on my house
 
 local midnightReset = false; //Keeps track of a once per day cumulative rain reset
 
-local local_hour_offset = 7; //Mountain time is 7 hours off GMT
+local local_hour_offset = 6; //Central time is 6 hours off GMT
 
 const MAX_PROGRAM_SIZE = 0x20000;
 const ARDUINO_BLOB_SIZE = 128;
@@ -30,14 +30,12 @@ program <- null;
 //------------------------------------------------------------------------------------------------------------------------------
 html <- @"<HTML>
 <BODY>
-
 <form method='POST' enctype='multipart/form-data'>
 Program the ATmega328 via the Imp.<br/><br/>
 Step 1: Select an Intel HEX file to upload: <input type=file name=hexfile><br/>
 Step 2: <input type=submit value=Press> to upload the file.<br/>
 Step 3: Check out your Arduino<br/>
 </form>
-
 </BODY>
 </HTML>
 ";
@@ -78,7 +76,7 @@ function send_program() {
         local addr = 0;
         local pline = {};
         local max_addr = program.len();
-        
+
         device.send("burn", {first=true});
         while (addr < max_addr) {
             program.seek(addr);
@@ -89,40 +87,40 @@ function send_program() {
         }
         device.send("burn", {last=true});
     }
-}        
+}
 
 //------------------------------------------------------------------------------------------------------------------------------
 // Parse the hex into an array of blobs
 function parse_hexfile(hex) {
-    
+
     try {
         // Look at this doc to work out what we need and don't. Max is about 122kb.
         // https://bluegiga.zendesk.com/entries/42713448--REFERENCE-Updating-BLE11x-firmware-using-UART-DFU
         server.log("Parsing hex file");
-        
+
         // Create and blank the program blob
         program = blob(0x20000); // 128k maximum
         for (local i = 0; i < program.len(); i++) program.writen(0x00, 'b');
         program.seek(0);
-        
+
         local maxaddress = 0, from = 0, to = 0, line = "", offset = 0x00000000;
         do {
             if (to < 0 || to == null || to >= hex.len()) break;
             from = hex.find(":", to);
-            
+
             if (from < 0 || from == null || from+1 >= hex.len()) break;
             to = hex.find(":", from+1);
-            
+
             if (to < 0 || to == null || from >= to || to >= hex.len()) break;
             line = hex.slice(from+1, to);
             // server.log(format("[%d,%d] => %s", from, to, line));
-            
+
             if (line.len() > 10) {
                 local len = hextoint(line.slice(0, 2));
                 local addr = hextoint(line.slice(2, 6));
                 local type = hextoint(line.slice(6, 8));
 
-                // Ignore all record types except 00, which is a data record. 
+                // Ignore all record types except 00, which is a data record.
                 // Look out for 02 records which set the high order byte of the address space
                 if (type == 0) {
                     // Normal data record
@@ -144,28 +142,28 @@ function parse_hexfile(hex) {
                     local datum = hextoint(line.slice(i, i+2));
                     program.writen(datum, 'b')
                 }
-                
+
                 // Checking the checksum would be a good idea but skipped for now
                 local checksum = hextoint(line.slice(-2));
-                
+
                 /// Shift the end point forward
                 if (program.tell() > maxaddress) maxaddress = program.tell();
-                
+
             }
         } while (from != null && to != null && from < to);
 
-        // Crop, save and send the program 
+        // Crop, save and send the program
         server.log(format("Max address: 0x%08x", maxaddress));
         program.resize(maxaddress);
         send_program();
         server.log("Free RAM: " + (imp.getmemoryfree()/1024) + " kb")
         return true;
-        
+
     } catch (e) {
         server.log(e)
         return false;
     }
-    
+
 }
 
 
@@ -188,7 +186,7 @@ http.onrequest(function (req, res) {
                 } else {
                     device.on("done", function(ready) {
                         res.header("Location", http.agenturl());
-                        res.send(302, "HEX file uploaded");                        
+                        res.send(302, "HEX file uploaded");
                         server.log("Programming completed")
                     })
                     server.log("Programming started")
@@ -235,21 +233,20 @@ device.on("ready", function(ready) {
 
 // When we hear something from the device, split it apart and post it
 device.on("postToInternet", function(dataString) {
-    
+
     //server.log("Incoming: " + dataString);
-    
+
     //Break the incoming string into pieces by comma
     a <- mysplit(dataString,',');
 
-    if(a[0] != "$" || a[16] != "#")
+    if(a.len() < 16 || a[0] != "$" || a[16] != "#")
     {
-        server.log(format("Error: incorrect frame received (%s, %s)", a[0], a[16]));
-        server.log(format("Received: %s)", dataString));
+        server.log(format("Skipping Received String", dataString));
         return(0);
     }
-    
+
     //Pull the various bits from the blob
-    
+
     //a[0] is $
     local winddir = a[1];
     local windspeedmph = a[2];
@@ -267,11 +264,9 @@ device.on("postToInternet", function(dataString) {
     local batt_lvl = a[14];
     local light_lvl = a[15];
     //a[16] is #
-    
-    server.log(tempf);
-    
+
     //Correct for the actual orientation of the weather station
-    //For my station the north indicator is pointing due west
+    //For my station the north indicator is pointing due south
     winddir = windCorrect(winddir);
     windgustdir = windCorrect(windgustdir);
     winddir_avg2m = windCorrect(winddir_avg2m);
@@ -297,7 +292,7 @@ device.on("postToInternet", function(dataString) {
 
     //Turn Pascal pressure into baromin (Inches Mercury at Altimeter Setting)
     local baromin = "baromin=" + convertToInHg(pressure);
-    
+
     //Calculate a dew point
     currentHumidity <- mysplit(humidity, '=');
     currentTempF <- mysplit(tempf, '=');
@@ -340,19 +335,18 @@ device.on("postToInternet", function(dataString) {
     //bigString += "&" + clouds;
     bigString += "&" + "softwaretype=SparkFunWeatherImp"; //Cause we can
     bigString += "&" + "realtime=1"; //You better believe it!
-    bigString += "&" + "rtfreq=10"; //Set rapid fire freq to once every 10 seconds
+    bigString += "&" + "rtfreq=60"; //Set rapid fire freq to once every 60 seconds
     bigString += "&" + "action=updateraw";
 
-    //server.log("string to send: " + bigString);
-    
+    server.log("Wunderground string to send: " + bigString);
+
     //Push to Wunderground
     local request = http.post(bigString, {}, "");
     local response = request.sendsync();
     server.log("Wunderground response = " + response.body);
-    server.log(batt_lvl + " " + light_lvl);
 
     //Get the local time that this measurement was taken
-    local localMeasurementTime = "measurementTime=" + calcLocalTime();
+    local localMeasurementTime = "measurementtime=" + calcLocalTime();
 
     //Now post to data.sparkfun.com
     //Here is a list of datums: measurementTime, winddir, windspeedmph, windgustmph, windgustdir, windspdmph_avg2m, winddir_avg2m, windgustmph_10m, windgustdir_10m, humidity, tempf, rainin, dailyrainin, baromin, dewptf, batt_lvl, light_lvl
@@ -381,26 +375,26 @@ device.on("postToInternet", function(dataString) {
     bigString += "&" + dewptf;
     bigString += "&" + batt_lvl;
     bigString += "&" + light_lvl;
-    
+
     //Push to SparkFun
     local request = http.get(bigString);
     local response = request.sendsync();
     server.log("SparkFun response = " + response.body);
 
     //Check to see if we need to send a midnight reset
-    checkMidnight(1);
+    checkMidnight();
 
     server.log("Update complete!");
-}); 
+});
 
 //Given a string, break out the direction, correct by some value
 //Return a string
 function windCorrect(direction) {
     temp <- mysplit(direction, '=');
 
-    //My station's North arrow is pointing due west
-    //So correct by 90 degrees
-    local dir = temp[1].tointeger() - 90; 
+    //My station's North arrow is pointing almost south
+    //So correct by 160 degrees
+    local dir = temp[1].tointeger() - 160;
     if(dir < 0) dir += 360;
     return(temp[0] + "=" + dir);
 }
@@ -415,7 +409,7 @@ function calcDewPoint(relativeHumidity, tempF) {
     local N = 237.3 + tempC;
     local B = (L + (M / N)) / 17.27;
     local dewPoint = (237.3 * B) / (1.0 - B);
-    
+
     //Result is in C
     //Convert back to F
     dewPoint = dewPoint * 9 / 5.0 + 32;
@@ -425,15 +419,17 @@ function calcDewPoint(relativeHumidity, tempF) {
     return(dewPoint);
 }
 
-function checkMidnight(ignore) {
+function checkMidnight() {
     //Check to see if it's midnight. If it is, send @ to Arduino to reset time based variables
 
     //Get the local time that this measurement was taken
-    local localTime = calcLocalTime(); 
-    
+    local localTime = calcLocalTime();
+    local amOrPm = localTime.slice(-2);
+
     //server.log("Local hour = " + format("%c", localTime[0]) + format("%c", localTime[1]));
 
-    if(localTime[0].tochar() == "0" && localTime[1].tochar() == "4")
+    if((localTime[0].tochar() == "1" && localTime[1].tochar() == "2") &&
+        (amOrPm.tolower() == "am"))
     {
         if(midnightReset == false)
         {
@@ -442,29 +438,30 @@ function checkMidnight(ignore) {
             device.send("sendMidnightReset", 1);
         }
     }
-    else {
+    else
+    {
         midnightReset = false; //Reset our state
     }
 }
-    
+
 //Recording to a google doc is a bit tricky. Many people have found ways of posting
 //to a google form to get data into a spreadsheet. This requires a https connection
 //so we use pushingbox to handle the secure connection.
 //See http://productforums.google.com/forum/#!topic/docs/f4hJKF1OQOw for more info
 //To push two items I had to use a GET instead of a post
 function recordLevels(batt, light) {
-    
+
     //Smash it all together
     local stringToSend = "http://api.pushingbox.com/pushingbox?devid=vB0A3446EBB4828F";
-    stringToSend = stringToSend + "&" + batt; 
+    stringToSend = stringToSend + "&" + batt;
     stringToSend = stringToSend + "&" + light;
     //server.log("string to send: " + stringToSend); //Debugging
-    
+
     //Push to internet
     local request = http.post(stringToSend, {}, "");
     local response = request.sendsync();
     //server.log("Google response=" + response.body);
-    
+
     server.log("Post to spreadsheet complete.")
 }
 
@@ -472,7 +469,7 @@ function recordLevels(batt, light) {
 function convertToInHg(pressure_Pa)
 {
     local pressure_mb = pressure_Pa / 100; //pressure is now in millibars, 1 pascal = 0.01 millibars
-    
+
     local part1 = pressure_mb - 0.3; //Part 1 of formula
     local part2 = 8.42288 / 100000.0;
     local part3 = math.pow((pressure_mb - 0.3), 0.190284);
@@ -515,10 +512,10 @@ function calcLocalTime()
     //Since 2007 DST starts on the second Sunday in March and ends the first Sunday of November
     //Let's just assume it's going to be this way for awhile (silly US government!)
     //Example from: http://stackoverflow.com/questions/5590429/calculating-daylight-savings-time-from-only-date
-    
+
     //The Imp .month returns 0-11. DoW expects 1-12 so we add one.
     local month = currentTime.month + 1;
-    
+
     local DoW = day_of_week(currentTime.year, month, currentTime.day); //Get the day of the week. 0 = Sunday, 6 = Saturday
     local previousSunday = currentTime.day - DoW;
 
@@ -528,8 +525,8 @@ function calcLocalTime()
     //In March, we are DST if our previous Sunday was on or after the 8th.
     if (month == 3)
     {
-        if(previousSunday >= 8) dst = true; 
-    } 
+        if(previousSunday >= 8) dst = true;
+    }
     //In November we must be before the first Sunday to be dst.
     //That means the previous Sunday must be before the 1st.
     if(month == 11)
@@ -546,11 +543,14 @@ function calcLocalTime()
     if(hour < local_hour_offset)
         hour += 24; //Add 24 hours before subtracting local offset
     hour -= local_hour_offset;
-    
+
     local AMPM = "AM";
-    if(hour > 12)
+    if(hour >= 12)
     {
-        hour -= 12; //Get rid of military time
+        if(hour > 12)
+        {
+            hour -= 12; //Get rid of military time
+        }
         AMPM = "PM";
     }
     if(hour == 0) hour = 12; //Midnight edge case
@@ -581,43 +581,43 @@ function day_of_week(year, month, day)
   year_fractional = year_digits / 4; //year_fractional = 2
 
   switch(month) {
-  case 1: 
+  case 1:
     month_lookup = 0; //January = 0
-    break; 
-  case 2: 
+    break;
+  case 2:
     month_lookup = 3; //February = 3
-    break; 
-  case 3: 
+    break;
+  case 3:
     month_lookup = 3; //March = 3
-    break; 
-  case 4: 
+    break;
+  case 4:
     month_lookup = 6; //April = 6
-    break; 
-  case 5: 
+    break;
+  case 5:
     month_lookup = 1; //May = 1
-    break; 
-  case 6: 
+    break;
+  case 6:
     month_lookup = 4; //June = 4
-    break; 
-  case 7: 
+    break;
+  case 7:
     month_lookup = 6; //July = 6
-    break; 
-  case 8: 
+    break;
+  case 8:
     month_lookup = 2; //August = 2
-    break; 
-  case 9: 
+    break;
+  case 9:
     month_lookup = 5; //September = 5
-    break; 
-  case 10: 
+    break;
+  case 10:
     month_lookup = 0; //October = 0
-    break; 
-  case 11: 
+    break;
+  case 11:
     month_lookup = 3; //November = 3
-    break; 
-  case 12: 
+    break;
+  case 12:
     month_lookup = 5; //December = 5
-    break; 
-  default: 
+    break;
+  default:
     month_lookup = 0; //Error!
     return(-1);
   }
